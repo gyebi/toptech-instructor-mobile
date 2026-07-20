@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Firebase Android configuration (environment-specific)
+google-services.json
+
 # typescript
 *.tsbuildinfo
 
