@@ -57,3 +57,4 @@ for Firebase and Android setup details.
 Only public client configuration may use the `EXPO_PUBLIC_` prefix. Never put
 database URLs, service-account JSON, private keys, Firebase Admin credentials,
 or PostgreSQL passwords in this repository or in the mobile bundle.
+# toptech-instructor-mobile
