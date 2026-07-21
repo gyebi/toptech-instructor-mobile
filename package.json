@@ -1,5 +1,5 @@
 {
-  "name": "mobile",
+  "name": "@toptech/instructor-mobile",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
@@ -20,7 +20,12 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@10.0.0"
 }
