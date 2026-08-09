@@ -46,6 +46,24 @@ export type AssignedStudent = {
   } | null;
 };
 
+export type StudentLesson = {
+  id: string;
+  lessonType: 'THEORY' | 'PRACTICAL' | 'ASSESSMENT' | 'REMEDIAL';
+  scheduledStart: string;
+  scheduledEnd: string;
+  status:
+    | 'SCHEDULED'
+    | 'CONFIRMED'
+    | 'POSTPONED'
+    | 'RESCHEDULED'
+    | 'COMPLETED'
+    | 'CANCELLED'
+    | 'NO_SHOW';
+  location: string | null;
+  notes: string | null;
+  rescheduledFromId: string | null;
+};
+
 type ApiErrorBody = {
   code?: string;
   error?: string;
@@ -123,4 +141,23 @@ export async function loadInstructorWorkspace(
     profile: profileResult.profile,
     students: studentResult.students,
   };
+}
+
+export async function loadStudentLessons(
+  firebaseUser: User,
+  enrolmentId: string,
+): Promise<StudentLesson[]> {
+  if (!enrolmentId.trim()) {
+    throw new Error('A valid enrolment ID is required.');
+  }
+
+  const result = await request<{
+    lessons: StudentLesson[];
+    total: number;
+  }>(
+    `/api/mobile/instructor/enrolments/${encodeURIComponent(enrolmentId)}/lessons`,
+    firebaseUser,
+  );
+
+  return result.lessons;
 }

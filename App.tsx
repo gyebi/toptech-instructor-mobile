@@ -29,7 +29,9 @@ import {
   API_URL,
   type AssignedStudent,
   type InstructorProfile,
+  type StudentLesson,
   loadInstructorWorkspace,
+  loadStudentLessons,
   MobileApiError,
   resolveInstructor,
 } from './src/mobile-api';
@@ -41,7 +43,9 @@ type Screen =
   | 'phone'
   | 'otp'
   | 'authorizing'
-  | 'dashboard';
+  | 'dashboard'
+  | 'student-detail'
+  | 'lesson-session';
 
 function normalizeGhanaPhone(value: string): string | null {
   const compact = value.replace(/[\s()-]/g, '');
@@ -89,10 +93,15 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [submittedPhone, setSubmittedPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [confirmation, setConfirmation] =
-    useState<ConfirmationResult | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [profile, setProfile] = useState<InstructorProfile | null>(null);
+
   const [students, setStudents] = useState<AssignedStudent[]>([]);
+  const [studentLessons, setStudentLessons] = useState<StudentLesson[]>([]);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
+
+  const [selectedStudent, setSelectedStudent] = useState<AssignedStudent | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,13 +228,57 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
-      {screen === 'dashboard' && profile ? (
+      {screen === 'lesson-session' && selectedStudent ? (
+        <LessonSessionScreen
+          assignment={selectedStudent}
+          lessons={studentLessons}
+          loading={lessonsLoading}
+          onBack={() => {
+            setScreen('student-detail');
+          }}
+        />
+      ) : screen === 'student-detail' && selectedStudent ? (
+        <StudentDetail
+          assignment={selectedStudent}
+          lessons={studentLessons}
+          lessonsLoading={lessonsLoading}
+          onBack={() => {
+            setSelectedStudent(null);
+            setScreen('dashboard');
+          }}
+          onStartLesson={() => {
+            setScreen('lesson-session');
+          }}
+        />
+      ) : screen === 'dashboard' && profile ? (
         <Dashboard
           profile={profile}
           students={students}
           refreshing={refreshing}
           onRefresh={refreshWorkspace}
           onLogout={logOut}
+          onStudentPress={async (student) => {
+            setSelectedStudent(student);
+            setStudentLessons([]);
+            setLessonsLoading(true);
+
+            try {
+              if (auth.currentUser) {
+                const lessons = await loadStudentLessons(
+                  auth.currentUser,
+                  student.enrolmentId,
+                );
+
+                setStudentLessons(lessons);
+              }
+
+              setScreen('student-detail');
+            } catch (lessonError) {
+              Alert.alert('Unable to load lessons', friendlyAuthError(lessonError));
+            } finally {
+              setLessonsLoading(false);
+            }
+          }}
         />
       ) : (
         <AuthScreen
@@ -420,12 +473,14 @@ function Dashboard({
   refreshing,
   onRefresh,
   onLogout,
+  onStudentPress,
 }: {
   profile: InstructorProfile;
   students: AssignedStudent[];
   refreshing: boolean;
   onRefresh: () => void;
   onLogout: () => void;
+  onStudentPress: (student: AssignedStudent) => void;
 }) {
   return (
     <View style={styles.dashboard}>
@@ -484,7 +539,12 @@ function Dashboard({
             </Text>
           </View>
         }
-        renderItem={({ item }) => <StudentCard assignment={item} />}
+        renderItem={({ item }) => (
+          <StudentCard
+            assignment={item}
+            onPress={() => onStudentPress(item)}
+          />
+        )}
         ListFooterComponent={
           <View style={styles.settingsCard}>
             <Text style={styles.settingsTitle}>Account</Text>
@@ -501,10 +561,22 @@ function Dashboard({
   );
 }
 
-function StudentCard({ assignment }: { assignment: AssignedStudent }) {
+function StudentCard({
+  assignment,
+  onPress,
+}: {
+  assignment: AssignedStudent;
+  onPress: () => void;
+}) {
   const student = assignment.student;
   return (
-    <View style={styles.studentCard}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.studentCard,
+        pressed && { opacity: 0.7 },
+      ]}
+    >
       <View style={styles.studentAvatar}>
         <Text style={styles.studentAvatarText}>
           {student.firstName.charAt(0)}{student.lastName.charAt(0)}
@@ -525,7 +597,245 @@ function StudentCard({ assignment }: { assignment: AssignedStudent }) {
           {assignment.assignmentType}
         </Text>
       </View>
-    </View>
+    </Pressable>
+  );
+}
+
+function StudentDetail({
+  assignment,
+  lessons,
+  lessonsLoading,
+  onBack,
+  onStartLesson,
+}: {
+  assignment: AssignedStudent;
+  lessons: StudentLesson[];
+  lessonsLoading: boolean;
+  onBack: () => void;
+  onStartLesson: () => void;
+}) {
+  const student = assignment.student;
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.dashboard}>
+        <View style={styles.dashboardHeader}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={10}
+            style={styles.backButton}
+          >
+            <Text style={styles.backButtonText}>← Back</Text>
+          </Pressable>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.studentList}>
+          <View style={styles.summaryCard}>
+            <View>
+              <Text style={styles.summaryLabel}>STUDENT</Text>
+              <Text style={styles.sectionTitle}>
+                {student.firstName} {student.lastName}
+              </Text>
+              <Text style={styles.studentNumber}>
+                {student.studentNumber}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Course</Text>
+            <Text style={styles.settingsCopy}>{assignment.course.name}</Text>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Assignment type</Text>
+            <Text style={styles.settingsCopy}>{assignment.assignmentType}</Text>
+          </View>
+
+          {assignment.cohort ? (
+            <View style={styles.settingsCard}>
+              <Text style={styles.settingsTitle}>Cohort</Text>
+              <Text style={styles.settingsCopy}>{assignment.cohort.name}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Scheduled lessons</Text>
+
+            {lessonsLoading ? (
+              <ActivityIndicator
+                style={{ marginTop: 16 }}
+                color={colors.brandBlue}
+              />
+            ) : lessons.length === 0 ? (
+              <Text style={styles.settingsCopy}>
+                No lessons have been scheduled yet.
+              </Text>
+            ) : (
+              lessons.map((lesson) => (
+                <View
+                  key={lesson.id}
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTopWidth: 1,
+                    borderTopColor: colors.line,
+                  }}
+                >
+                  <Text style={styles.studentName}>
+                    {new Date(lesson.scheduledStart).toLocaleDateString()}
+                  </Text>
+
+                  <Text style={styles.settingsCopy}>
+                    {new Date(lesson.scheduledStart).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                    {' · '}
+                    {lesson.lessonType}
+                  </Text>
+
+                  <Text style={styles.studentNumber}>{lesson.status}</Text>
+                </View>
+              ))
+            )}
+          </View>
+
+          <Pressable onPress={onStartLesson} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>
+              Start Lesson
+            </Text>
+          </Pressable>
+        </ScrollView>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function LessonSessionScreen({
+  assignment,
+  lessons,
+  loading,
+  onBack,
+}: {
+  assignment: AssignedStudent;
+  lessons: StudentLesson[];
+  loading: boolean;
+  onBack: () => void;
+}) {
+  const student = assignment.student;
+
+  const [attendance, setAttendance] = useState<'PRESENT' | 'ABSENT' | 'LATE'>(
+    'PRESENT',
+  );
+
+  const [notes, setNotes] = useState('');
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.dashboard}>
+        <View style={styles.dashboardHeader}>
+          <Pressable onPress={onBack}>
+            <Text style={{ color: colors.white, fontWeight: '800' }}>
+              ← Back
+            </Text>
+          </Pressable>
+
+          <View style={{ marginLeft: 16 }}>
+            <Text style={styles.headerEyebrow}>LESSON SESSION</Text>
+            <Text style={styles.headerName}>
+              {student.firstName} {student.lastName}
+            </Text>
+            <Text style={styles.headerMeta}>{student.studentNumber}</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.studentList}>
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Course</Text>
+            <Text style={styles.settingsCopy}>{assignment.course.name}</Text>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Lessons</Text>
+            <Text style={styles.settingsCopy}>
+              {loading
+                ? 'Loading lessons...'
+                : `${lessons.length} lesson${lessons.length === 1 ? '' : 's'} loaded`}
+            </Text>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Attendance</Text>
+
+            <View style={{ marginTop: 12 }}>
+              {(['PRESENT', 'LATE', 'ABSENT'] as const).map((status) => (
+                <Pressable
+                  key={status}
+                  onPress={() => setAttendance(status)}
+                  style={{
+                    padding: 14,
+                    borderRadius: 12,
+                    marginBottom: 8,
+                    backgroundColor:
+                      attendance === status
+                        ? colors.brandBlueLight
+                        : '#F8F9FB',
+                    borderWidth: 1,
+                    borderColor:
+                      attendance === status ? colors.brandBlue : colors.line,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: attendance === status ? colors.brandBlue : colors.ink,
+                      fontWeight: '800',
+                    }}
+                  >
+                    {status}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Lesson notes</Text>
+
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              placeholder="Add notes about today's lesson..."
+              placeholderTextColor="#98A2B3"
+              style={{
+                minHeight: 120,
+                marginTop: 12,
+                borderWidth: 1,
+                borderColor: colors.line,
+                borderRadius: 14,
+                padding: 14,
+                textAlignVertical: 'top',
+                color: colors.ink,
+                backgroundColor: '#FAFBFC',
+              }}
+            />
+          </View>
+
+          <PrimaryButton
+            label="Save Lesson"
+            onPress={() => {
+              Alert.alert(
+                'Lesson ready',
+                `Attendance: ${attendance}\n\nNotes: ${
+                  notes.trim() || 'No notes entered'
+                }`,
+              );
+            }}
+          />
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -601,6 +911,18 @@ const styles = StyleSheet.create({
   studentCourse: { color: colors.muted, fontSize: 12, marginTop: 4 },
   assignmentBadge: { maxWidth: 88, backgroundColor: '#FFF4CC', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6 },
   assignmentBadgeText: { color: '#715600', fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  studentDetailScreen: { flex: 1, backgroundColor: colors.background },
+  studentDetailHeader: { backgroundColor: colors.brandBlueDark, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 28 },
+  backButton: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 16 },
+  backButtonText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  studentDetailEyebrow: { color: colors.brandYellow, fontSize: 11, fontWeight: '800', letterSpacing: 1.8 },
+  studentDetailTitle: { color: colors.white, fontSize: 28, fontWeight: '800', marginTop: 6 },
+  studentDetailCopy: { color: '#D8E1FF', fontSize: 13, marginTop: 6 },
+  studentDetailBody: { padding: 16 },
+  studentDetailCard: { backgroundColor: colors.white, borderRadius: 17, padding: 18, borderWidth: 1, borderColor: colors.line, marginBottom: 12, shadowColor: colors.brandBlue, shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 2 },
+  studentDetailLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.1, textTransform: 'uppercase' },
+  studentDetailValue: { color: colors.ink, fontSize: 20, fontWeight: '800', marginTop: 6 },
+  studentDetailMeta: { color: colors.muted, fontSize: 13, marginTop: 4, lineHeight: 18 },
   emptyCard: { backgroundColor: colors.white, borderRadius: 17, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: colors.line, borderStyle: 'dashed' },
   emptyTitle: { color: colors.ink, fontSize: 16, fontWeight: '800' },
   emptyCopy: { color: colors.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 6 },
